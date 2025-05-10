@@ -1,51 +1,41 @@
 #!/bin/bash
 #PBS -q batch
-#PBS -N vcf_isec_compare
+#PBS -N isec_compare
 #PBS -m abe
-#PBS -l walltime=01:00:00
-#PBS -l nodes=1:ppn=2,pmem=4gb
+#PBS -l walltime=24:00:00
+#PBS -l nodes=1:ppn=4,pmem=7gb
 #PBS -l feature='epyc'
 
-module load bcftools/1.17
+module load bio/bcftools/1.10.2
 
-# Go to working directory
-cd $PBS_O_WORKDIR
+echo "[INFO] PBS job started at $(date)"
+cd $PBS_O_WORKDIR || { echo "[ERROR] Failed to change to PBS_O_WORKDIR"; exit 1; }
 
-# Define directories and file names
-SAREK_DIR="/mnt/beegfs2/home/edgars02/250505_el/sarek_output/variant_calling"
-OUT_DIR="$PBS_O_WORKDIR/vcf_comparison_output"
-mkdir -p $OUT_DIR
+# Reference genome (make sure .fai exists)
+REF="/home_beegfs/groups/bmc/references/igenomes/Homo_sapiens/GATK/GRCh38/Sequence/WholeGenomeFasta/Homo_sapiens_assembly38.fasta"
 
-# Specify sample ID (adjust to your actual sample name)
-SAMPLE="sample1"
+# Input VCFs (gVCFs in this case)
+VCF1="~/250210_RR_repr/Raimonds/RG0004-2023-08-09.haplotypecaller.g.vcf.gz"
+VCF2="~/250210_RR_repr/sarek_output/variant_calling/haplotypecaller/E150013583_C/E150013583_C.haplotypecaller.g.vcf.gz"
 
-# Input VCF files — adjust the filenames if needed
-VCF_HC="${SAREK_DIR}/haplotypecaller/${SAMPLE}.hc.filtered.vcf.gz"
-VCF_DV="${SAREK_DIR}/deepvariant/${SAMPLE}.dv.filtered.vcf.gz"
+# Expand paths (since ~ doesn't expand inside variables)
+VCF1=$(realpath ~/250210_RR_repr/Raimonds/RG0004-2023-08-09.haplotypecaller.g.vcf.gz)
+VCF2=$(realpath ~/250210_RR_repr/sarek_output/variant_calling/haplotypecaller/E150013583_C/E150013583_C.haplotypecaller.g.vcf.gz)
 
-# Check files exist
-if [[ ! -f $VCF_HC || ! -f $VCF_DV ]]; then
-    echo "Error: One or both VCF files not found."
-    exit 1
-fi
+# Output normalized VCFs
+OUT1="RG0004.norm.vcf.gz"
+OUT2="E150013583_C.norm.vcf.gz"
 
-# Index VCFs if not already indexed
-if [[ ! -f "${VCF_HC}.tbi" ]]; then
-    bcftools index $VCF_HC
-fi
+echo "[INFO] Normalizing VCF1: $VCF1"
+bcftools norm -f $REF -m -both -Oz -o $OUT1 $VCF1 || { echo "[ERROR] Normalization failed for VCF1"; exit 1; }
+bcftools index $OUT1
 
-if [[ ! -f "${VCF_DV}.tbi" ]]; then
-    bcftools index $VCF_DV
-fi
+echo "[INFO] Normalizing VCF2: $VCF2"
+bcftools norm -f $REF -m -both -Oz -o $OUT2 $VCF2 || { echo "[ERROR] Normalization failed for VCF2"; exit 1; }
+bcftools index $OUT2
 
-# Perform intersection using bcftools isec
-bcftools isec -p ${OUT_DIR}/${SAMPLE}_hc_vs_dv \
-    -n=2 -w1 $VCF_HC $VCF_DV
+echo "[INFO] Running bcftools isec to compare normalized VCFs"
+bcftools isec -p isec_output $OUT1 $OUT2 || { echo "[ERROR] bcftools isec failed"; exit 1; }
 
-# Description:
-# -p: output directory
-# -n=2: only variants common to both files
-# -w1: match both position and genotype
-
-# Optional: generate summary
-echo "Variant comparison done for $SAMPLE. Results stored in $OUT_DIR."
+echo "[INFO] Comparison complete. Results saved in ./isec_output/"
+echo "[INFO] PBS job finished at $(date)"
